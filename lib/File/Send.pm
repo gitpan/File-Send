@@ -1,12 +1,13 @@
 package File::Send;
 {
-  $File::Send::VERSION = '0.001';
+  $File::Send::VERSION = '0.002';
 }
 use strict;
 use warnings;
 use Carp;
+use Errno 'EAGAIN';
 
-use Sub::Exporter -setup => { exports => ['sendfile'], groups => { default => ['sendfile'] } };
+use Sub::Exporter::Progressive -setup => { exports => ['sendfile'], groups => { default => ['sendfile'] } };
 
 use Fcntl 'SEEK_CUR';
 sub _systell {
@@ -18,7 +19,7 @@ my $backend = eval { require Sys::Sendfile; 'Sys::Sendfile' } || eval { require 
 if ($backend eq 'Sys::Sendfile') {
 	*sendfile = sub {
 		my $ret = Sys::Sendfile::sendfile(@_);
-		croak "Couldn't sendfile: $!" if not defined $ret;
+		croak "Couldn't sendfile: $!" if not defined $ret and $! != EAGAIN;
 		return $ret;
 	}
 }
@@ -27,16 +28,10 @@ elsif ($backend eq 'File::Map') {
 		my ($out, $in, $length) = @_;
 		my $offset = _systell $in;
 		$length ||= (-s $in) - $offset;
-		my $retval = 0;
 		File::Map::map_handle(my $map, $in, '<', $offset, $length);
-		while ($length) {
-			my $ret = syswrite $out, $map;
-			defined $retval ? return $retval : croak "Couldn't sendfile: $!" if not defined $ret;
-			$retval += $ret;
-			$offset += $ret;
-			$length -= $ret;
-		}
-		return $retval;
+		my $ret = syswrite $out, $map;
+		croak "Couldn't sendfile: $!" if not defined $ret and $! != EAGAIN;
+		return $ret;
 	}
 }
 else {
@@ -44,8 +39,6 @@ else {
 }
 
 1;
-
-
 
 =pod
 
@@ -55,7 +48,7 @@ File::Send - Sending files over a socket efficiently and cross-platform
 
 =head1 VERSION
 
-version 0.001
+version 0.002
 
 =head1 SYNOPSIS
 
@@ -85,7 +78,6 @@ This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.
 
 =cut
-
 
 __END__
 
